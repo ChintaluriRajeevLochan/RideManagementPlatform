@@ -6,7 +6,7 @@ A full-stack ride management web app for IIT Roorkee-style campus e-rickshaw coo
 
 - Backend: Java 21, Spring Boot, Spring Security, Spring Data JPA, WebSocket/STOMP
 - Database: PostgreSQL
-- Frontend: React, TypeScript, Vite
+- Frontend: React, TypeScript, Vite, Leaflet, OpenStreetMap
 - UI: CSS modules-style global styling, Lucide icons, Recharts
 
 ## Mandatory Features Implemented
@@ -26,6 +26,15 @@ A full-stack ride management web app for IIT Roorkee-style campus e-rickshaw coo
 - Driver dashboard with completed rides, active rides, history, ratings, and chart
 - Passenger ratings and written feedback for completed rides
 - Average driver rating and feedback history
+
+## Optional Features Implemented
+
+- Live map integration with Leaflet and OpenStreetMap
+- Campus pickup/destination coordinates seeded into PostgreSQL
+- Passenger map with pickup, destination, and assigned driver marker
+- Driver map with pickup and destination for active/incoming rides
+- Driver GPS tracking through the browser Geolocation API
+- Real-time driver location updates through WebSocket events
 
 ## Project Structure
 
@@ -205,6 +214,9 @@ POST /api/drivers/availability/offline
 GET  /api/drivers/available
 GET  /api/drivers/requests
 GET  /api/drivers/dashboard
+POST /api/drivers/location
+
+GET  /api/locations
 
 POST /api/rides
 GET  /api/rides/my
@@ -230,8 +242,10 @@ Live topics used:
 
 ```text
 /topic/drivers/availability
+/topic/drivers/location
 /topic/rides/requests
 /topic/rides/{rideId}
+/topic/rides/{rideId}/driver-location
 /topic/users/{userId}/notifications
 /topic/drivers/{driverId}/dashboard
 ```
@@ -239,4 +253,5 @@ Live topics used:
 ## Notes
 
 - Deployment is intentionally out of scope because it was not required in the challenge.
-- Bonus features such as live maps, scheduling, payments, analytics, and forecasting can be added later without changing the core structure.
+- Drivers must allow browser location permission after going online for live GPS tracking to update.
+- Bonus features such as route lines, scheduling, payments, analytics, and forecasting can be added later without changing the core structure.
