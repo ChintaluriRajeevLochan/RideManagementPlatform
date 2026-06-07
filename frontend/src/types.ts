@@ -24,6 +24,7 @@ export interface DriverDetails {
   averageRating: number;
   ratingCount: number;
   vehicle: Vehicle | null;
+  location: DriverLocation | null;
 }
 
 export interface User {
@@ -53,6 +54,24 @@ export interface DriverSummary {
   averageRating: number;
   ratingCount: number;
   vehicle: Vehicle | null;
+  location: DriverLocation | null;
+}
+
+export interface CampusLocation {
+  id: number;
+  name: string;
+  category: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface DriverLocation {
+  driverId: number;
+  driverName: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  updatedAt?: string | null;
 }
 
 export interface Rating {
@@ -71,13 +90,20 @@ export interface Ride {
   driver: BasicUser | null;
   pickupLocation: string;
   destination: string;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  destinationLatitude?: number | null;
+  destinationLongitude?: number | null;
   status: RideStatus;
   requestedAt: string;
   acceptedAt?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
   cancelledAt?: string | null;
+  latestRejectedBy?: BasicUser | null;
+  latestRejectedAt?: string | null;
   rating?: Rating | null;
+  driverLocation?: DriverLocation | null;
 }
 
 export interface StatusCount {

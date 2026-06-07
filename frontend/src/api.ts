@@ -1,5 +1,7 @@
 import type {
   AuthResponse,
+  CampusLocation,
+  DriverLocation,
   DriverDashboard,
   DriverSummary,
   Rating,
@@ -102,6 +104,9 @@ export const api = {
   availableDrivers(token: string) {
     return request<DriverSummary[]>('/drivers/available', token);
   },
+  campusLocations(token: string) {
+    return request<CampusLocation[]>('/locations', token);
+  },
   goOnline(token: string) {
     return request<DriverSummary>('/drivers/availability/online', token, { method: 'POST' });
   },
@@ -111,10 +116,21 @@ export const api = {
   incomingRequests(token: string) {
     return request<Ride[]>('/drivers/requests', token);
   },
+  updateDriverLocation(token: string, payload: { latitude: number; longitude: number; accuracy?: number | null }) {
+    return request<DriverLocation>('/drivers/location', token, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
   driverDashboard(token: string) {
     return request<DriverDashboard>('/drivers/dashboard', token);
   },
-  createRide(token: string, payload: { pickupLocation: string; destination: string }) {
+  createRide(token: string, payload: {
+    pickupLocation: string;
+    destination: string;
+    pickupLocationId?: number;
+    destinationLocationId?: number;
+  }) {
     return request<Ride>('/rides', token, {
       method: 'POST',
       body: JSON.stringify(payload)

@@ -1,4 +1,6 @@
 import { Client } from '@stomp/stompjs';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Activity,
   Bell,
@@ -9,17 +11,20 @@ import {
   LogOut,
   MapPin,
   Navigation,
+  LocateFixed,
   ShieldCheck,
   Star,
   UserRound,
   XCircle
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api, sessionStore } from './api';
 import type {
   AuthResponse,
   AvailabilityStatus,
+  CampusLocation,
   DriverDashboard as DriverDashboardData,
   DriverSummary,
   RealtimeEvent,
@@ -28,20 +33,7 @@ import type {
   User
 } from './types';
 
-const campusLocations = [
-  'Rajiv Bhawan',
-  'Main Building',
-  'Central Library',
-  'Student Activity Centre',
-  'Cautley Bhawan',
-  'Ravindra Bhawan',
-  'Jawahar Bhawan',
-  'LBS Stadium',
-  'Convocation Hall',
-  'Hospital',
-  'Main Gate',
-  'Century Gate'
-];
+const campusCenter: [number, number] = [29.8667, 77.8966];
 
 const activeStatuses: RideStatus[] = ['REQUESTED', 'ACCEPTED', 'IN_PROGRESS'];
 
@@ -57,6 +49,12 @@ const availabilityMeta: Record<AvailabilityStatus, { label: string; tone: string
   ONLINE: { label: 'Online', tone: 'success' },
   OFFLINE: { label: 'Offline', tone: 'muted' },
   BUSY: { label: 'Busy', tone: 'active' }
+};
+
+const mapIcons = {
+  pickup: mapIcon('P', 'pickup'),
+  destination: mapIcon('D', 'destination'),
+  driver: mapIcon('R', 'driver')
 };
 
 export default function App() {
@@ -364,17 +362,25 @@ function PassengerDashboard({
 }) {
   const [drivers, setDrivers] = useState<DriverSummary[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
+  const [locations, setLocations] = useState<CampusLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [pickupLocation, setPickupLocation] = useState(campusLocations[0]);
-  const [destination, setDestination] = useState(campusLocations[1]);
+  const [pickupLocationId, setPickupLocationId] = useState<number | null>(null);
+  const [destinationLocationId, setDestinationLocationId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const [availableDrivers, myRides] = await Promise.all([api.availableDrivers(token), api.myRides(token)]);
+      const [availableDrivers, myRides, campusLocations] = await Promise.all([
+        api.availableDrivers(token),
+        api.myRides(token),
+        api.campusLocations(token)
+      ]);
       setDrivers(availableDrivers);
       setRides(myRides);
+      setLocations(campusLocations);
+      setPickupLocationId((current) => validLocationId(current, campusLocations) ?? campusLocations[0]?.id ?? null);
+      setDestinationLocationId((current) => validLocationId(current, campusLocations) ?? campusLocations[1]?.id ?? campusLocations[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load passenger dashboard');
     } finally {
@@ -387,13 +393,28 @@ function PassengerDashboard({
   }, [load, realtimeTick]);
 
   const activeRide = useMemo(() => rides.find((ride) => activeStatuses.includes(ride.status)) ?? null, [rides]);
+  const selectedPickup = useMemo(() => locations.find((location) => location.id === pickupLocationId) ?? null, [locations, pickupLocationId]);
+  const selectedDestination = useMemo(() => locations.find((location) => location.id === destinationLocationId) ?? null, [locations, destinationLocationId]);
   const completedRides = rides.filter((ride) => ride.status === 'COMPLETED');
 
   async function requestRide(event: React.FormEvent) {
     event.preventDefault();
     setError('');
+    if (!selectedPickup || !selectedDestination) {
+      setError('Select pickup and destination');
+      return;
+    }
+    if (selectedPickup.id === selectedDestination.id) {
+      setError('Pickup and destination must be different');
+      return;
+    }
     try {
-      await api.createRide(token, { pickupLocation, destination });
+      await api.createRide(token, {
+        pickupLocation: selectedPickup.name,
+        destination: selectedDestination.name,
+        pickupLocationId: selectedPickup.id,
+        destinationLocationId: selectedDestination.id
+      });
       onNotice('Ride requested');
       await load();
     } catch (err) {
@@ -428,13 +449,18 @@ function PassengerDashboard({
       <section className="panel span-two">
         <PanelHeader icon={<MapPin size={20} />} title="Request a ride" subtitle="Choose pickup and destination inside campus" />
         <form className="request-form" onSubmit={requestRide}>
-          <LocationSelect label="Pickup" value={pickupLocation} onChange={setPickupLocation} />
-          <LocationSelect label="Destination" value={destination} onChange={setDestination} />
-          <button className="primary-button" type="submit" disabled={Boolean(activeRide)}>
+          <LocationSelect label="Pickup" locations={locations} value={pickupLocationId} onChange={setPickupLocationId} />
+          <LocationSelect label="Destination" locations={locations} value={destinationLocationId} onChange={setDestinationLocationId} />
+          <button className="primary-button" type="submit" disabled={Boolean(activeRide) || !selectedPickup || !selectedDestination}>
             Request ride
           </button>
         </form>
         {activeRide && <p className="soft-note">Finish or cancel your active ride before requesting another one.</p>}
+      </section>
+
+      <section className="panel span-two">
+        <PanelHeader icon={<LocateFixed size={20} />} title="Campus map" subtitle="Pickup, destination, and assigned driver location" />
+        <RideMap ride={activeRide} pickup={selectedPickup} destination={selectedDestination} />
       </section>
 
       <section className="panel">
@@ -501,6 +527,8 @@ function DriverDashboard({
   const [incoming, setIncoming] = useState<Ride[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState('GPS idle');
+  const lastSentLocationRef = useRef<{ latitude: number; longitude: number; sentAt: number } | null>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -533,6 +561,67 @@ function DriverDashboard({
   }
 
   const availability = user.driver?.availabilityStatus ?? 'OFFLINE';
+
+  useEffect(() => {
+    if (availability === 'OFFLINE') {
+      setGpsStatus('GPS paused');
+      lastSentLocationRef.current = null;
+      return;
+    }
+    if (!navigator.geolocation) {
+      setGpsStatus('GPS unavailable');
+      return;
+    }
+
+    let cancelled = false;
+    setGpsStatus('Waiting for GPS');
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const nextLocation = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        };
+        const last = lastSentLocationRef.current;
+        if (last && Date.now() - last.sentAt < 10_000 && distanceMeters(last, nextLocation) < 12) {
+          return;
+        }
+
+        lastSentLocationRef.current = {
+          latitude: nextLocation.latitude,
+          longitude: nextLocation.longitude,
+          sentAt: Date.now()
+        };
+
+        void api.updateDriverLocation(token, nextLocation)
+          .then(() => {
+            if (!cancelled) {
+              setGpsStatus('GPS live');
+            }
+          })
+          .catch((err) => {
+            if (!cancelled) {
+              setGpsStatus(err instanceof Error ? err.message : 'GPS sync failed');
+            }
+          });
+      },
+      (geoError) => {
+        setGpsStatus(geolocationErrorMessage(geoError));
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 15000
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [availability, token]);
+
   const chartData = dashboard?.rideStatusBreakdown.map((item) => ({
     status: statusMeta[item.status].label,
     count: item.count
@@ -562,6 +651,10 @@ function DriverDashboard({
               {user.driver.vehicle.vehicleNumber} · {user.driver.vehicle.vehicleType} · {user.driver.vehicle.capacity} seats
             </span>
           )}
+          <span className={`gps-chip ${availability === 'OFFLINE' ? '' : 'active'}`}>
+            <LocateFixed size={16} />
+            {gpsStatus}
+          </span>
         </div>
       </section>
 
@@ -579,6 +672,7 @@ function DriverDashboard({
                 key={ride.id}
                 ride={ride}
                 compact
+                showMap
                 actions={
                   <div className="action-row">
                     <button className="primary-button" type="button" disabled={busy || availability !== 'ONLINE'} onClick={() => runAction(() => api.acceptRide(token, ride.id), 'Ride accepted')}>
@@ -600,6 +694,7 @@ function DriverDashboard({
         {dashboard?.activeRide ? (
           <RideCard
             ride={dashboard.activeRide}
+            showMap
             actions={
               <div className="action-row">
                 {dashboard.activeRide.status === 'ACCEPTED' && (
@@ -724,22 +819,26 @@ function ProfilePanel({
 
 function LocationSelect({
   label,
+  locations,
   value,
   onChange
 }: {
   label: string;
-  value: string;
-  onChange: (value: string) => void;
+  locations: CampusLocation[];
+  value: number | null;
+  onChange: (value: number | null) => void;
 }) {
   return (
     <label>
       {label}
-      <input list="campus-locations" value={value} onChange={(event) => onChange(event.target.value)} required />
-      <datalist id="campus-locations">
-        {campusLocations.map((location) => (
-          <option key={location} value={location} />
+      <select value={value ?? ''} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} required>
+        <option value="" disabled>Select location</option>
+        {locations.map((location) => (
+          <option key={location.id} value={location.id}>
+            {location.name}
+          </option>
         ))}
-      </datalist>
+      </select>
     </label>
   );
 }
@@ -757,7 +856,23 @@ function DriverRow({ driver }: { driver: DriverSummary }) {
   );
 }
 
-function RideCard({ ride, actions, compact = false }: { ride: Ride; actions?: React.ReactNode; compact?: boolean }) {
+function RideCard({
+  ride,
+  actions,
+  compact = false,
+  showMap = false
+}: {
+  ride: Ride;
+  actions?: React.ReactNode;
+  compact?: boolean;
+  showMap?: boolean;
+}) {
+  const rideNotice = ride.driver
+    ? { tone: 'accepted', icon: <CheckCircle2 size={16} />, text: `Ride accepted by ${ride.driver.name}` }
+    : ride.status === 'REQUESTED' && ride.latestRejectedBy
+      ? { tone: 'rejected', icon: <XCircle size={16} />, text: `Ride rejected by ${ride.latestRejectedBy.name}` }
+      : null;
+
   return (
     <article className={`ride-card ${compact ? 'compact' : ''}`}>
       <div className="ride-card-top">
@@ -767,17 +882,144 @@ function RideCard({ ride, actions, compact = false }: { ride: Ride; actions?: Re
         </div>
         <StatusPill label={statusMeta[ride.status].label} tone={statusMeta[ride.status].tone} />
       </div>
+      {rideNotice && (
+        <div className={`ride-event-note ${rideNotice.tone}`}>
+          {rideNotice.icon}
+          <span>{rideNotice.text}</span>
+        </div>
+      )}
       <div className="ride-meta-grid">
         <span><MapPin size={15} /> Pickup: {ride.pickupLocation}</span>
         <span><Navigation size={15} /> Destination: {ride.destination}</span>
         <span><Clock3 size={15} /> Requested: {formatTime(ride.requestedAt)}</span>
         <span><UserRound size={15} /> Passenger: {ride.passenger.name}</span>
         {ride.driver && <span><ShieldCheck size={15} /> Driver: {ride.driver.name}</span>}
+        {ride.latestRejectedBy && !ride.driver && <span><XCircle size={15} /> Latest rejection: {formatTime(ride.latestRejectedAt)}</span>}
         {ride.rating && <span><Star size={15} /> Rating: {ride.rating.score}/5</span>}
       </div>
+      {showMap && <RideMap ride={ride} />}
       {actions && <div className="ride-actions">{actions}</div>}
     </article>
   );
+}
+
+type RideMapProps = {
+  ride?: Ride | null;
+  pickup?: CampusLocation | null;
+  destination?: CampusLocation | null;
+};
+
+type MapPoint = {
+  key: string;
+  label: string;
+  detail: string;
+  latitude: number;
+  longitude: number;
+  icon: L.DivIcon;
+};
+
+function RideMap({ ride, pickup, destination }: RideMapProps) {
+  const points = useMemo(() => {
+    const pickupPoint = ride?.pickupLatitude != null && ride?.pickupLongitude != null
+      ? {
+        key: 'pickup',
+        label: 'Pickup',
+        detail: ride.pickupLocation,
+        latitude: ride.pickupLatitude,
+        longitude: ride.pickupLongitude,
+        icon: mapIcons.pickup
+      }
+      : pickup
+        ? {
+          key: 'pickup',
+          label: 'Pickup',
+          detail: pickup.name,
+          latitude: pickup.latitude,
+          longitude: pickup.longitude,
+          icon: mapIcons.pickup
+        }
+        : null;
+
+    const destinationPoint = ride?.destinationLatitude != null && ride?.destinationLongitude != null
+      ? {
+        key: 'destination',
+        label: 'Destination',
+        detail: ride.destination,
+        latitude: ride.destinationLatitude,
+        longitude: ride.destinationLongitude,
+        icon: mapIcons.destination
+      }
+      : destination
+        ? {
+          key: 'destination',
+          label: 'Destination',
+          detail: destination.name,
+          latitude: destination.latitude,
+          longitude: destination.longitude,
+          icon: mapIcons.destination
+        }
+        : null;
+
+    const driverPoint = ride?.driverLocation
+      ? {
+        key: 'driver',
+        label: 'Driver',
+        detail: ride.driverLocation.driverName,
+        latitude: ride.driverLocation.latitude,
+        longitude: ride.driverLocation.longitude,
+        icon: mapIcons.driver
+      }
+      : null;
+
+    return [pickupPoint, destinationPoint, driverPoint].filter(Boolean) as MapPoint[];
+  }, [destination, pickup, ride]);
+
+  if (points.length === 0) {
+    return <EmptyState text="Map coordinates unavailable" />;
+  }
+
+  const center: [number, number] = [points[0].latitude, points[0].longitude];
+
+  return (
+    <div className="map-shell">
+      <MapContainer center={center} zoom={16} scrollWheelZoom={false} className="ride-map">
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <FitMapToPoints points={points} />
+        {points.map((point) => (
+          <Marker
+            key={`${point.key}-${point.latitude}-${point.longitude}`}
+            position={[point.latitude, point.longitude]}
+            icon={point.icon}
+          >
+            <Popup>
+              <strong>{point.label}</strong>
+              <br />
+              {point.detail}
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+    </div>
+  );
+}
+
+function FitMapToPoints({ points }: { points: MapPoint[] }) {
+  const map = useMap();
+  const pointKey = points.map((point) => `${point.key}:${point.latitude.toFixed(5)}:${point.longitude.toFixed(5)}`).join('|');
+
+  useEffect(() => {
+    if (points.length === 1) {
+      map.setView([points[0].latitude, points[0].longitude], 16);
+      return;
+    }
+    const bounds = L.latLngBounds(points.map((point) => [point.latitude, point.longitude]));
+    map.fitBounds(bounds, { padding: [38, 38], maxZoom: 17 });
+  }, [map, pointKey, points]);
+
+  return null;
 }
 
 function RatingForm({
@@ -874,6 +1116,48 @@ function EmptyState({ text }: { text: string }) {
       <span>{text}</span>
     </div>
   );
+}
+
+function validLocationId(current: number | null, locations: CampusLocation[]) {
+  if (current == null) {
+    return null;
+  }
+  return locations.some((location) => location.id === current) ? current : null;
+}
+
+function mapIcon(label: string, tone: 'pickup' | 'destination' | 'driver') {
+  return L.divIcon({
+    className: `map-pin map-pin-${tone}`,
+    html: `<span>${label}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -18]
+  });
+}
+
+function distanceMeters(
+  start: { latitude: number; longitude: number },
+  end: { latitude: number; longitude: number }
+) {
+  const earthRadiusMeters = 6371000;
+  const startLat = toRadians(start.latitude);
+  const endLat = toRadians(end.latitude);
+  const latDelta = toRadians(end.latitude - start.latitude);
+  const lonDelta = toRadians(end.longitude - start.longitude);
+  const a = Math.sin(latDelta / 2) ** 2
+    + Math.cos(startLat) * Math.cos(endLat) * Math.sin(lonDelta / 2) ** 2;
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRadians(value: number) {
+  return value * Math.PI / 180;
+}
+
+function geolocationErrorMessage(error: GeolocationPositionError) {
+  if (error.code === error.PERMISSION_DENIED) return 'GPS permission denied';
+  if (error.code === error.POSITION_UNAVAILABLE) return 'GPS unavailable';
+  if (error.code === error.TIMEOUT) return 'GPS timeout';
+  return 'GPS error';
 }
 
 function formatTime(value?: string | null) {

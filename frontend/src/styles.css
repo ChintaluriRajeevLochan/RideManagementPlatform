@@ -499,6 +499,26 @@ button:disabled {
   align-items: center;
 }
 
+.ride-event-note {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-weight: 800;
+}
+
+.ride-event-note.accepted {
+  color: var(--teal-dark);
+  background: var(--mint);
+}
+
+.ride-event-note.rejected {
+  color: var(--coral);
+  background: var(--coral-soft);
+}
+
 .status-pill {
   min-height: 28px;
   display: inline-flex;
@@ -618,6 +638,73 @@ button:disabled {
   background: var(--steel-soft);
   color: var(--steel);
   font-weight: 800;
+}
+
+.gps-chip {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #eef1f2;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.gps-chip.active {
+  color: var(--teal-dark);
+  background: var(--mint);
+}
+
+.map-shell {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #dbe7e4;
+}
+
+.ride-card .map-shell {
+  min-height: 240px;
+}
+
+.ride-map {
+  width: 100%;
+  height: 320px;
+}
+
+.ride-card .ride-map {
+  height: 240px;
+}
+
+.map-pin {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(23, 32, 42, 0.24);
+}
+
+.map-pin span {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.map-pin-pickup {
+  background: var(--teal);
+}
+
+.map-pin-destination {
+  background: var(--coral);
+}
+
+.map-pin-driver {
+  background: var(--steel);
 }
 
 .driver-verification {
