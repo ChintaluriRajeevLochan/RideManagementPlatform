@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -50,6 +51,11 @@ public class DriverProfile {
 
     @Column(nullable = false)
     private int ratingCount;
+
+    private Double currentLatitude;
+    private Double currentLongitude;
+    private Double locationAccuracy;
+    private Instant lastLocationUpdatedAt;
 
     public DriverProfile(User user, String licenseNumber, String verificationDocument) {
         this.user = user;

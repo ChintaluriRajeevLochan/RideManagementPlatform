@@ -10,6 +10,7 @@ public record DriverSummaryResponse(
         AvailabilityStatus availabilityStatus,
         BigDecimal averageRating,
         int ratingCount,
-        VehicleResponse vehicle
+        VehicleResponse vehicle,
+        DriverLocationResponse location
 ) {
 }
